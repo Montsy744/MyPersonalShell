@@ -32,6 +32,8 @@ void affiche_prompt();
 
 void execute_ligne_commande(char ***ligneCommande, int nb, int flag);
 
+int lance_commande(int in, int out, const char *com, char ** argv);
+
 int main(void) {
 
     while(1) {
@@ -71,27 +73,75 @@ void affiche_prompt() {
     fflush(stdout);
 }
 
-void execute_ligne_commande(char ***ligneCommande, int nb, int flag) {
+void execute_ligne_commande(char ***ligneCommande, int nb, int arriere_plan) {
     
-    for (int i = 0; i < nb; i++) {
-        pid_t pid = fork();
-        if (pid == -1) {
-            perror("fork");
-            return;
-        }
-        else if (pid == 0) {
-            // Exécuter la commande si réussi alors break
-            execvp(ligneCommande[i][0], ligneCommande[i]);
+    int in_precedent = 0;
+    pid_t pids[nb];
+    int nb_pids = 0; 
+    int pid;
 
-            perror("execvp");
-            exit(EXIT_FAILURE);
-        }
-        else {
-            int status;
-            if (flag == 0) {
-                waitpid(pid, &status, 0);
+    for (int i = 0; i < nb; i++) {
+        int out;
+        int tube[2];
+        
+        if (i < nb - 1) { 
+            if (pipe(tube) == -1) {
+                perror("pipe");
+                continue; 
             }
+            out = tube[1];  
+        } else {
+            out = 1; 
+        }
+
+        pid = lance_commande(in_precedent, out, ligneCommande[i][0], ligneCommande[i]);
+
+        if (pid != -1) {
+            pids[nb_pids] = pid; 
+            nb_pids++;
+        }
+
+        if(in_precedent != 0) {
+            close(in_precedent);
+        }
+        if(out != 1) {
+            close(out);
+        }
+        in_precedent = tube[0];
+    }
+    if (arriere_plan == 0) {
+        for (int i = 0; i < nb_pids; i++) {
+            waitpid(pids[i], NULL, 0);
         }
     }
+}
+
+int lance_commande(int in, int out, const char *com, char ** argv) {
+    pid_t pid = fork();
+    if (pid == -1) {
+        perror("fork");
+        return -1;
+    } 
+    else {
+        if (pid == 0) { // enfant
+            //redirection entrée
+            if (in != 0) {
+                dup2(in, 0);
+                close(in);
+            }
+            //redirection sortie  
+            if (out != 1) {
+                dup2(out, 1);
+                close(out);
+            }
+
+            execvp(com, argv);
+            perror("execvp");
+            exit(1);
+        } else {
+            return pid;
+        }
+    }
+    return -1;
 }
 
